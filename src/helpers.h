@@ -10,6 +10,6 @@ void freeArrays(double *A, double *B, double *C);
 long long readEnergy();
 int createReport(double timeTaken, double energyConsumed);
 std::pair<double, double> parallelVersion(int n);
-int caller(std::pair<double, double> (*func)(int));
+int caller(std::string type, std::pair<double, double> (*func)(int, int), const int cores);
 
 #endif

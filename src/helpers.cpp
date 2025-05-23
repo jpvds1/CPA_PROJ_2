@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <chrono>
 #include <utility>
+#include <string>
 
 // Function to read energy consumption from the system
 long long readEnergy()
@@ -20,13 +21,32 @@ long long readEnergy()
     return energy;
 }
 
-// Create and save a report
-int createReport(const int time, const int energy)
+// Save the results to a file
+void saveResult(std::string type, int size, int cores, double time, double consumed, long long values[])
 {
-    std::cout << "Time: " << time << " ms" << std::endl;
-    std::cout << "Energy: " << energy << " J" << std::endl;
+    std::string line = type + ',' +
+                       std::to_string(size) + ',' +
+                       std::to_string(cores) + ',' +
+                       std::to_string(time) + ',' +
+                       std::to_string(consumed);
 
-    return 0;
+    for (int i = 0; i < 5; i++)
+    {
+        line += ',' + std::to_string(values[i]);
+    }
+
+    std::ofstream file("../data/results.txt", std::ios::app);
+
+    if (file.is_open())
+    {
+        file << line << "\n";
+        file.close();
+        std::cout << line << std::endl;
+    }
+    else
+    {
+        std::cout << "Error: " << line << std::endl;
+    }
 }
 
 // Setup PAPI and return the EventSet
@@ -125,7 +145,7 @@ void freeArrays(double *A, double *B, double *C)
     free(C);
 }
 
-int caller(std::pair<double, double> (*func)(int))
+int caller(std::string type, std::pair<double, double> (*func)(int, int), const int cores)
 {
     std::pair<double, double> results;
 
@@ -148,11 +168,11 @@ int caller(std::pair<double, double> (*func)(int))
     {
         PAPI_start(EventSet);
 
-        results = func(size);
+        results = func(size, cores);
 
         PAPI_stop(EventSet, values);
 
-        createReport(results.first, results.second);
+        saveResult(type, size, cores, results.first, results.second, values);
     }
 
     cleanupPAPI(EventSet);

@@ -12,7 +12,7 @@
 #include "helpers.h"
 #include <utility>
 
-std::pair<double, double> sequentialVersion(const int n)
+std::pair<double, double> sequentialVersion(const int n, const int cores)
 {
     clock_t startTime, endTime;
     long long energyBefore, energyAfter;
@@ -39,13 +39,15 @@ std::pair<double, double> sequentialVersion(const int n)
     return {timeTaken, energyConsumed};
 }
 
-std::pair<double, double>  parallelVersion(const int n)
+std::pair<double, double>  parallelVersion(const int n, const int cores)
 {
     clock_t startTime, endTime;
     long long energyBefore, energyAfter;
 
     double *A, *B, *C;
     setupArrays(&A, &B, &C, n);
+
+    omp_set_num_threads(cores);
 
     startTime = clock();
     energyBefore = readEnergy();
@@ -72,7 +74,7 @@ std::pair<double, double>  parallelVersion(const int n)
 
 int main()
 {
-    caller(parallelVersion);
+    caller("Parallel", parallelVersion, 16);
 
     return 0;
 }
