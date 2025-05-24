@@ -111,9 +111,13 @@ int cleanupPAPI(int &EventSet)
 // Setup arrays for matrix multiplication
 void setupArrays(double **A, double **B, double **C, const int size)
 {
-    *A = (double *)malloc(size * size * sizeof(double));
-    *B = (double *)malloc(size * size * sizeof(double));
-    *C = (double *)calloc(size * size, sizeof(double));
+    size_t alignment = 64;
+    size_t bytes = size * size * sizeof(double);
+
+    *A = (double *)aligned_alloc(alignment, bytes);
+    *B = (double *)aligned_alloc(alignment, bytes);
+    *C = (double *)aligned_alloc(alignment, bytes);
+    std::memset(*C, 0, bytes);
 
     for (int i = 0; i < size; i++)
         for (int j = 0; j < size; j++)
