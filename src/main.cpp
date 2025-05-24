@@ -87,6 +87,16 @@ std::pair<double, double> SYCLVersion(const int n, const int blockSize, queue& q
     buffer<double, 2> B_buf(B, range<2>(n, n));
     buffer<double, 2> C_buf(C, range<2>(n, n));
 
+    {
+        host_accessor a_acc(A_buf, write_only);
+        host_accessor b_acc(B_buf, write_only);
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j) {
+                a_acc[i][j] = A[i * n + j];
+                b_acc[i][j] = B[i * n + j];
+            }
+    }
+
     q.submit([&](handler& h) {
         accessor A_acc(A_buf, h, read_only);
         accessor B_acc(B_buf, h, read_only);
@@ -128,6 +138,13 @@ std::pair<double, double> SYCLVersion(const int n, const int blockSize, queue& q
     });
 
     q.wait();
+
+    {
+        host_accessor c_acc(C_buf, read_only);
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j)
+                C[i * n + j] = c_acc[i][j];
+    }
 
     long long energyAfter = readEnergy();
     auto end = std::chrono::high_resolution_clock::now();
