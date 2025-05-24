@@ -111,14 +111,13 @@ std::pair<double, double> SYCLVersion(const int n, const int blockSize, queue& q
     auto start = std::chrono::high_resolution_clock::now();
     long long energyBefore = readEnergy();
 
-    // Round up global size to multiples of blockSize
-    size_t globalSize = ((n + blockSize - 1) / blockSize) * blockSize;
+    size_t globalSize = (n + blockSize - 1) / blockSize * blockSize;
 
     q.submit([&](handler& h) {
-        local_accessor<double, 2> A_tile({blockSize, blockSize}, h);
-        local_accessor<double, 2> B_tile({blockSize, blockSize}, h);
+        local_accessor<double, 2> A_tile({static_cast<size_t>(blockSize), static_cast<size_t>(blockSize)}, h);
+        local_accessor<double, 2> B_tile({static_cast<size_t>(blockSize), static_cast<size_t>(blockSize)}, h);
 
-        h.parallel_for(nd_range<2>({globalSize, globalSize}, {blockSize, blockSize}),
+        h.parallel_for(nd_range<2>({globalSize, globalSize}, {static_cast<size_t>(blockSize), static_cast<size_t>(blockSize)}),
             [=](nd_item<2> item) {
                 int row = item.get_global_id(0);
                 int col = item.get_global_id(1);
@@ -127,9 +126,7 @@ std::pair<double, double> SYCLVersion(const int n, const int blockSize, queue& q
 
                 double sum = 0.0;
 
-                // Loop over tiles of input matrices
                 for (int t = 0; t < n; t += blockSize) {
-                    // Load tiles into local memory with bounds check
                     if (row < n && (t + lj) < n)
                         A_tile[li][lj] = A_dev[row * n + t + lj];
                     else
@@ -142,11 +139,9 @@ std::pair<double, double> SYCLVersion(const int n, const int blockSize, queue& q
 
                     item.barrier(access::fence_space::local_space);
 
-                    // Unroll the multiply-accumulate loop to improve ILP
                     #pragma unroll
-                    for (int k = 0; k < blockSize; ++k) {
+                    for (int k = 0; k < blockSize; ++k)
                         sum += A_tile[li][k] * B_tile[k][lj];
-                    }
 
                     item.barrier(access::fence_space::local_space);
                 }
