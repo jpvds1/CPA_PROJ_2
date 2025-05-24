@@ -62,27 +62,25 @@ std::pair<double, double> parallelVersion(const int n, const int cores, const in
     auto start = std::chrono::high_resolution_clock::now();
     long long energyBefore = readEnergy();
 
-    #pragma omp parallel for collapse(2) schedule(static)
-    for (int i = 0; i < n; i += blockSize) {
-        for (int j = 0; j < n; j += blockSize) {
-            for (int k = 0; k < n; k += blockSize) {
+    #pragma omp parallel for collapse(3) schedule(static)
+    for (int i = 0; i < n; i += blockSize)
+        for (int j = 0; j < n; j += blockSize)
+            for (int k = 0; k < n; k += blockSize)
+            {
+                int iMax = std::min(i + blockSize, n);
+                int jMax = std::min(j + blockSize, n);
+                int kMax = std::min(k + blockSize, n);
 
-                int iEnd = std::min(i + blockSize, n);
-                int jEnd = std::min(j + blockSize, n);
-                int kEnd = std::min(k + blockSize, n);
-
-                for (int ii = i; ii < iEnd; ++ii) {
-                    for (int jj = j; jj < jEnd; ++jj) {
-                        double sum = 0.0;
-                        for (int kk = k; kk < kEnd; ++kk)
-                            sum += A[ii * n + kk] * B[kk * n + jj];
-                        #pragma omp atomic
-                        C[ii * n + jj] += sum;
+                for (int ii = i; ii < iMax; ++ii)
+                    for (int kk = k; kk < kMax; ++kk) {
+                        double a_val = A[ii * n + kk];
+                        for (int jj = j; jj < jMax; ++jj)
+                            C[ii * n + jj] += a_val * B[kk * n + jj];
                     }
-                }
             }
-        }
-    }
+
+
+
 
     long long energyAfter = readEnergy();
     auto end = std::chrono::high_resolution_clock::now();
