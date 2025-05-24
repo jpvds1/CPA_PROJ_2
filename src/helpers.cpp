@@ -145,15 +145,15 @@ void freeArrays(double *A, double *B, double *C)
     free(C);
 }
 
-int caller(std::string type, std::pair<double, double> (*func)(int, int), const int cores)
+int caller(std::string type, std::pair<double, double> (*func)(int, int, int), const int cores)
 {
     std::pair<double, double> results;
 
     std::vector<int> sizes;
-    // for (int i = 1024; i <= 8192; i += 1024)
-    //     sizes.push_back(i);
-    for (int i = 200; i <= 1000; i += 200)
+    for (int i = 1024; i <= 8192; i += 1024)
         sizes.push_back(i);
+    //for (int i = 200; i <= 1000; i += 200)
+    //    sizes.push_back(i);
 
     int EventSet = PAPI_NULL;
     long long values[7];
@@ -168,7 +168,7 @@ int caller(std::string type, std::pair<double, double> (*func)(int, int), const 
     {
         PAPI_start(EventSet);
 
-        results = func(size, cores);
+        results = func(size, cores, 64);
 
         PAPI_stop(EventSet, values);
 
