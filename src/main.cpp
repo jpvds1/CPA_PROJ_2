@@ -23,12 +23,20 @@ std::pair<double, double> sequentialVersion(const int n, const int blockSize)
     long long energyBefore = readEnergy();
 
     for (int i = 0; i < n; i += blockSize)
-        for (int j = 0; j < n; j += blockSize)
-            for (int k = 0; k < n; k += blockSize)
-                for (int ii = i; ii < std::min(i + blockSize, n); ++ii)
-                    for (int jj = j; jj < std::min(j + blockSize, n); ++jj)
-                        for (int kk = k; kk < std::min(k + blockSize, n); ++kk)
-                            C[ii * n + jj] += A[ii * n + kk] * B[kk * n + jj];
+        for (int k = 0; k < n; k += blockSize)
+            for (int j = 0; j < n; j += blockSize) {
+                int iMax = std::min(i + blockSize, n);
+                int kMax = std::min(k + blockSize, n);
+                int jMax = std::min(j + blockSize, n);
+                for (int ii = i; ii < iMax; ++ii)
+                    for (int kk = k; kk < kMax; ++kk) {
+                        double a_val = A[ii * n + kk];
+                        #pragma omp simd
+                        for (int jj = j; jj < jMax; ++jj)
+                            C[ii * n + jj] += a_val * B[kk * n + jj];
+                    }
+            }
+
 
     long long energyAfter = readEnergy();
     auto end = std::chrono::high_resolution_clock::now();
@@ -49,17 +57,17 @@ std::pair<double, double> parallelVersion(const int n, const int cores, const in
     auto start = std::chrono::high_resolution_clock::now();
     long long energyBefore = readEnergy();
 
-    #pragma omp parallel for collapse(2) schedule(dynamic)
+    #pragma omp parallel for collapse(2) schedule(static)
     for (int i = 0; i < n; i += blockSize) {
         for (int j = 0; j < n; j += blockSize) {
             for (int k = 0; k < n; k += blockSize) {
                 for (int ii = i; ii < std::min(i + blockSize, n); ++ii) {
                     for (int jj = j; jj < std::min(j + blockSize, n); ++jj) {
-                        double temp = C[ii * n + jj];
-                        for (int kk = k; kk < std::min(k + blockSize, n); ++kk) {
-                            temp += A[ii * n + kk] * B[kk * n + jj];
-                        }
-                        C[ii * n + jj] = temp;
+                        double sum = 0.0;
+                        for (int kk = k; kk < std::min(k + blockSize, n); ++kk)
+                            sum += A[ii * n + kk] * B[kk * n + jj];
+                        #pragma omp atomic
+                        C[ii * n + jj] += sum;
                     }
                 }
             }
@@ -77,84 +85,80 @@ std::pair<double, double> parallelVersion(const int n, const int cores, const in
 }
 
 std::pair<double, double> SYCLVersion(const int n, const int blockSize, queue& q) {
+    // Host arrays
     double *A, *B, *C;
     setupArrays(&A, &B, &C, n);
+
+    // Device allocations using USM
+    double* A_dev = malloc_device<double>(n * n, q);
+    double* B_dev = malloc_device<double>(n * n, q);
+    double* C_dev = malloc_device<double>(n * n, q);
+
+    // Copy input matrices to device
+    q.memcpy(A_dev, A, n * n * sizeof(double)).wait();
+    q.memcpy(B_dev, B, n * n * sizeof(double)).wait();
 
     auto start = std::chrono::high_resolution_clock::now();
     long long energyBefore = readEnergy();
 
-    buffer<double, 2> A_buf(A, range<2>(n, n));
-    buffer<double, 2> B_buf(B, range<2>(n, n));
-    buffer<double, 2> C_buf(C, range<2>(n, n));
-
-    {
-        host_accessor a_acc(A_buf, write_only);
-        host_accessor b_acc(B_buf, write_only);
-        for (int i = 0; i < n; ++i)
-            for (int j = 0; j < n; ++j) {
-                a_acc[i][j] = A[i * n + j];
-                b_acc[i][j] = B[i * n + j];
-            }
-    }
+    size_t globalSize = (n + blockSize - 1) / blockSize * blockSize;
 
     q.submit([&](handler& h) {
-        accessor A_acc(A_buf, h, read_only);
-        accessor B_acc(B_buf, h, read_only);
-        accessor C_acc(C_buf, h, write_only, no_init);
-
         local_accessor<double, 2> A_tile({static_cast<size_t>(blockSize), static_cast<size_t>(blockSize)}, h);
         local_accessor<double, 2> B_tile({static_cast<size_t>(blockSize), static_cast<size_t>(blockSize)}, h);
 
-        h.parallel_for(nd_range<2>({(size_t)n, (size_t)n}, {(size_t)blockSize, (size_t)blockSize}), [=](nd_item<2> item) {
-            int row = item.get_global_id(0);
-            int col = item.get_global_id(1);
-            double sum = 0.0;
+        h.parallel_for(nd_range<2>({globalSize, globalSize}, {static_cast<size_t>(blockSize), static_cast<size_t>(blockSize)}),
+            [=](nd_item<2> item) {
+                int row = item.get_global_id(0);
+                int col = item.get_global_id(1);
+                int li = item.get_local_id(0);
+                int lj = item.get_local_id(1);
 
-            for (int t = 0; t < (n + blockSize - 1) / blockSize; ++t) {
-                int a_col = t * blockSize + item.get_local_id(1);
-                int b_row = t * blockSize + item.get_local_id(0);
+                double sum = 0.0;
 
-                if (row < n && a_col < n)
-                    A_tile[item.get_local_id(0)][item.get_local_id(1)] = A_acc[row][a_col];
-                else
-                    A_tile[item.get_local_id(0)][item.get_local_id(1)] = 0.0;
+                for (int t = 0; t < n; t += blockSize) {
+                    if (row < n && t + lj < n)
+                        A_tile[li][lj] = A_dev[row * n + t + lj];
+                    else
+                        A_tile[li][lj] = 0.0;
 
-                if (b_row < n && col < n)
-                    B_tile[item.get_local_id(0)][item.get_local_id(1)] = B_acc[b_row][col];
-                else
-                    B_tile[item.get_local_id(0)][item.get_local_id(1)] = 0.0;
+                    if (t + li < n && col < n)
+                        B_tile[li][lj] = B_dev[(t + li) * n + col];
+                    else
+                        B_tile[li][lj] = 0.0;
 
-                item.barrier(access::fence_space::local_space);
+                    item.barrier(access::fence_space::local_space);
 
-                for (int k = 0; k < blockSize; ++k)
-                    sum += A_tile[item.get_local_id(0)][k] * B_tile[k][item.get_local_id(1)];
+                    for (int k = 0; k < blockSize; ++k)
+                        sum += A_tile[li][k] * B_tile[k][lj];
 
-                item.barrier(access::fence_space::local_space);
-            }
+                    item.barrier(access::fence_space::local_space);
+                }
 
-            if (row < n && col < n)
-                C_acc[row][col] = sum;
-        });
+                if (row < n && col < n)
+                    C_dev[row * n + col] = sum;
+            });
     });
 
     q.wait();
 
-    {
-        host_accessor c_acc(C_buf, read_only);
-        for (int i = 0; i < n; ++i)
-            for (int j = 0; j < n; ++j)
-                C[i * n + j] = c_acc[i][j];
-    }
-
     long long energyAfter = readEnergy();
     auto end = std::chrono::high_resolution_clock::now();
+
+    // Copy result back to host
+    q.memcpy(C, C_dev, n * n * sizeof(double)).wait();
 
     double timeTaken = std::chrono::duration<double, std::milli>(end - start).count();
     double energyConsumed = (energyAfter - energyBefore) / 1e6;
 
     freeArrays(A, B, C);
+    free(A_dev, q);
+    free(B_dev, q);
+    free(C_dev, q);
+
     return {timeTaken, energyConsumed};
 }
+
 
 int main() {
     settings s = getSettings();
@@ -165,7 +169,7 @@ int main() {
 
     std::pair<double, double> results;
     std::vector<int> sizes;
-    for (int i = 200; i <= 1000; i += 200)
+    for (int i = 1024; i <= 8192; i += 1024)
         sizes.push_back(i);
 
     int EventSet = PAPI_NULL;
@@ -211,7 +215,11 @@ int main() {
                     results = SYCLVersion(size, s.blockSize, q);
                     PAPI_stop(EventSet, values);
 
-                    saveResult("SYCL", size, s.cores, s.blockSize, results.first, results.second, values);
+                    if (q.get_device().is_gpu()) {
+                        saveResult("SYCL_GPU", size, s.cores, s.blockSize, results.first, results.second, values);
+                    } else {
+                        saveResult("SYCL_CPU", size, s.cores, s.blockSize, results.first, results.second, values);
+                    } 
                 } else {
                     std::cerr << "No suitable device found. Exiting." << std::endl;
                     return 1;
