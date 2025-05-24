@@ -1,16 +1,4 @@
-#include <omp.h>
-#include <stdio.h>
-#include <iostream>
-#include <iomanip>
-#include <time.h>
-#include <cstdlib>
-#include <papi.h>
-#include <vector>
-#include <fstream>
-#include <unistd.h>
-#include <chrono>
-#include <utility>
-#include <string>
+#include "helpers.h"
 
 // Function to read energy consumption from the system
 long long readEnergy()
@@ -22,11 +10,12 @@ long long readEnergy()
 }
 
 // Save the results to a file
-void saveResult(std::string type, int size, int cores, double time, double consumed, long long values[])
+void saveResult(std::string type, int size, int cores, int blockSize, double time, double consumed, long long values[])
 {
     std::string line = type + ',' +
                        std::to_string(size) + ',' +
                        std::to_string(cores) + ',' +
+                       std::to_string(blockSize) + ',' +
                        std::to_string(time) + ',' +
                        std::to_string(consumed);
 
@@ -72,8 +61,6 @@ int setupPAPI(int &EventSet)
         PAPI_TOT_INS,
     };
 
-    int i = 0;
-
     for (int e : events)
     {
         if (PAPI_query_event(e) != PAPI_OK)
@@ -88,8 +75,6 @@ int setupPAPI(int &EventSet)
             std::cerr << "Failed to add PAPI event: " << e << " (error " << ret << ")" << std::endl;
             continue;
         }
-
-        i++;
     }
 
     return PAPI_OK;
@@ -145,34 +130,31 @@ void freeArrays(double *A, double *B, double *C)
     free(C);
 }
 
-int caller(std::string type, std::pair<double, double> (*func)(int, int, int), const int cores)
+int caller(std::string type,
+           std::function<std::pair<double, double>(int, int, int, int)> func,
+           const int cores,
+           const int deviceChoice,
+        const int blockSize)
 {
     std::pair<double, double> results;
-
     std::vector<int> sizes;
     for (int i = 1024; i <= 8192; i += 1024)
         sizes.push_back(i);
-    //for (int i = 200; i <= 1000; i += 200)
-    //    sizes.push_back(i);
 
     int EventSet = PAPI_NULL;
     long long values[7];
 
-    if (setupPAPI(EventSet) != PAPI_OK)
-    {
+    if (setupPAPI(EventSet) != PAPI_OK) {
         std::cerr << "PAPI setup failed!" << std::endl;
         return 1;
     }
 
-    for (int size : sizes)
-    {
+    for (int size : sizes) {
         PAPI_start(EventSet);
-
-        results = func(size, cores, 64);
-
+        results = func(size, blockSize, cores, deviceChoice);
         PAPI_stop(EventSet, values);
 
-        saveResult(type, size, cores, results.first, results.second, values);
+        saveResult(type, size, cores, blockSize, results.first, results.second, values);
     }
 
     cleanupPAPI(EventSet);
