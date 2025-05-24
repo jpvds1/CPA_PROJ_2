@@ -14,7 +14,7 @@
 
 using namespace cl::sycl;
 
-std::pair<double, double> sequentialVersion(const int n, const int blockSize,  queue& q)
+std::pair<double, double> sequentialVersion(const int n, const int blockSize)
 {
     double *A, *B, *C;
     setupArrays(&A, &B, &C, n);
@@ -40,7 +40,7 @@ std::pair<double, double> sequentialVersion(const int n, const int blockSize,  q
     return {timeTaken, energyConsumed};
 }
 
-std::pair<double, double> parallelVersion(const int n, const int cores, const int blockSize,  queue& q)
+std::pair<double, double> parallelVersion(const int n, const int cores, const int blockSize)
 {
     double *A, *B, *C;
     setupArrays(&A, &B, &C, n);
@@ -140,83 +140,72 @@ std::pair<double, double> SYCLVersion(const int n, const int blockSize, queue& q
 }
 
 int main() {
-    int cores = omp_get_max_threads();
-    int blockSize;
-    int algorithmChoice;
-    int platformIndex = 0;
-    int deviceIndex = 0;
+    settings s = getSettings();
+    if (s.errorCode != 0) {
+        std::cerr << "Error in settings. Exiting." << std::endl;
+        return s.errorCode;
+    }
 
-    std::cout << "Choose algorithm:\n0. Sequential\n1. Parallel\n2. SYCL\n> ";
-    std::cin >> algorithmChoice;
+    std::pair<double, double> results;
+    std::vector<int> sizes;
+    for (int i = 200; i <= 1000; i += 200)
+        sizes.push_back(i);
 
-    if (algorithmChoice < 0 || algorithmChoice > 2) {
-        std::cerr << "Invalid choice. Exiting.\n";
+    int EventSet = PAPI_NULL;
+    long long values[7];
+
+    if (setupPAPI(EventSet) != PAPI_OK) {
+        std::cerr << "PAPI setup failed!" << std::endl;
         return 1;
     }
 
-    if (algorithmChoice == 1) {
-        std::cout << "Enter number of cores (default " << cores << "): ";
-        std::cin >> cores;
-        if (cores <= 0 || cores > omp_get_max_threads()) {
-            cores = omp_get_max_threads();
-        }
-    }
-
-    if (algorithmChoice == 2) {
-        auto platforms = platform::get_platforms();
-        std::cout << "Available platforms:\n";
-        for (size_t i = 0; i < platforms.size(); ++i)
-            std::cout << i << ": " << platforms[i].get_info<info::platform::name>() << "\n";
-        std::cout << "Select platform index: ";
-        std::cin >> platformIndex;
-
-        auto devices = platforms[platformIndex].get_devices();
-        std::cout << "Available devices:\n";
-        for (size_t i = 0; i < devices.size(); ++i)
-            std::cout << i << ": " << devices[i].get_info<info::device::name>() << "\n";
-        std::cout << "Select device index: ";
-        std::cin >> deviceIndex;
-    }
-
-    std::cout << "Enter block size (default 64): ";
-    std::cin >> blockSize;
-    if (blockSize <= 0) blockSize = 64;
-
-    std::cout << "\nUsing block size: " << blockSize << "\n";
-    std::cout << "Using " << cores << " cores\n";
-    std::cout << "Running algorithm choice: " << algorithmChoice << "\n";
-
-    // SYCL queue (optional, created only if needed)
-    queue q;
-    if (algorithmChoice == 2) {
-        q = queue(platform::get_platforms()[platformIndex].get_devices()[deviceIndex]);
-        std::cout << "SYCL running on: " << q.get_device().get_info<info::device::name>() << "\n";
-    }
-
-    switch (algorithmChoice) {
+    switch (s.algorithmChoice) {
         case 0: {
-            auto wrapper = [&](int n, int blockSize, int, int) {
-                return sequentialVersion(n, blockSize, q);
-            };
-            caller("Sequential", wrapper, cores, 0, blockSize);
+            for (int size : sizes) {
+                std::cout << "Running Sequential for size: " << size << std::endl;
+                
+                PAPI_start(EventSet);
+                results = sequentialVersion(size, s.blockSize);
+                PAPI_stop(EventSet, values);
+
+                saveResult("Sequential", size, s.cores, s.blockSize, results.first, results.second, values);
+            }
             break;
         }
         case 1: {
-            auto wrapper = [&](int n, int blockSize, int cores, int) {
-                return parallelVersion(n, cores, blockSize, q);
-            };
-            caller("Parallel", wrapper, cores, 0, blockSize);
+            for (int size : sizes) {
+                std::cout << "Running Parallel for size: " << size << std::endl;
+
+                PAPI_start(EventSet);
+                results = parallelVersion(size, s.cores, s.blockSize);
+                PAPI_stop(EventSet, values);
+
+                saveResult("Parallel", size, s.cores, s.blockSize, results.first, results.second, values);
+            }
             break;
         }
         case 2: {
-            auto wrapper = [&](int n, int blockSize, int, int) {
-                return SYCLVersion(n, blockSize, q);
-            };
-            caller("SYCL", wrapper, cores, 0, blockSize);
+            for (int size : sizes) {
+                queue q = queue(platform::get_platforms()[s.platformIndex].get_devices()[s.deviceIndex]);
+                if (q.get_device().is_gpu() || q.get_device().is_cpu()) {
+                    std::cout << "SYCL running for size: " << size << " on: " << q.get_device().get_info<info::device::name>() << "\n";
+
+                    PAPI_start(EventSet);
+                    results = SYCLVersion(size, s.blockSize, q);
+                    PAPI_stop(EventSet, values);
+
+                    saveResult("SYCL", size, s.cores, s.blockSize, results.first, results.second, values);
+                } else {
+                    std::cerr << "No suitable device found. Exiting." << std::endl;
+                    return 1;
+                }
+            }
             break;
         }
         default:
-            break;
+            std::cerr << "Invalid algorithm choice. Exiting." << std::endl;
+            cleanupPAPI(EventSet);
+            return 1;
     }
 
     return 0;

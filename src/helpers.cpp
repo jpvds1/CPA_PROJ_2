@@ -1,5 +1,7 @@
 #include "helpers.h"
 
+using namespace cl::sycl;
+
 // Function to read energy consumption from the system
 long long readEnergy()
 {
@@ -130,33 +132,53 @@ void freeArrays(double *A, double *B, double *C)
     free(C);
 }
 
-int caller(std::string type,
-           std::function<std::pair<double, double>(int, int, int, int)> func,
-           const int cores,
-           const int deviceChoice,
-        const int blockSize)
-{
-    std::pair<double, double> results;
-    std::vector<int> sizes;
-    for (int i = 1024; i <= 8192; i += 1024)
-        sizes.push_back(i);
+settings getSettings() {
+    settings s;
 
-    int EventSet = PAPI_NULL;
-    long long values[7];
+    std::cout << "Choose algorithm:\n0. Sequential\n1. Parallel\n2. SYCL\n> ";
+    std::cin >> s.algorithmChoice;
 
-    if (setupPAPI(EventSet) != PAPI_OK) {
-        std::cerr << "PAPI setup failed!" << std::endl;
-        return 1;
+    if (s.algorithmChoice < 0 || s.algorithmChoice > 2) {
+        std::cerr << "Invalid choice. Exiting.\n";
+        s.errorCode = 1;
+        return s;
     }
 
-    for (int size : sizes) {
-        PAPI_start(EventSet);
-        results = func(size, blockSize, cores, deviceChoice);
-        PAPI_stop(EventSet, values);
-
-        saveResult(type, size, cores, blockSize, results.first, results.second, values);
+    if (s.algorithmChoice == 1) {
+        std::cout << "Enter number of cores (default " << omp_get_max_threads() << "): ";
+        std::cin >> s.cores;
+        if (s.cores <= 0 || s.cores > omp_get_max_threads()) {
+            s.cores = omp_get_max_threads();
+        }
     }
 
-    cleanupPAPI(EventSet);
-    return 0;
+    if (s.algorithmChoice == 2) {
+        auto platforms = platform::get_platforms();
+        std::cout << "Available platforms:\n";
+        for (size_t i = 0; i < platforms.size(); ++i)
+            std::cout << i << ": " << platforms[i].get_info<info::platform::name>() << "\n";
+        std::cout << "Select platform index: ";
+        std::cin >> s.platformIndex;
+
+        auto devices = platforms[s.platformIndex].get_devices();
+        std::cout << "Available devices:\n";
+        for (size_t i = 0; i < devices.size(); ++i)
+            std::cout << i << ": " << devices[i].get_info<info::device::name>() << "\n";
+        std::cout << "Select device index: ";
+        std::cin >> s.deviceIndex;
+    }
+
+    std::cout << "Enter block size (default 64): ";
+    std::cin >> s.blockSize;
+    if (s.blockSize <= 0) s.blockSize = 64;
+
+    std::cout << "\nUsing block size: " << s.blockSize << "\n";
+    if (s.algorithmChoice == 1) std::cout << "Using " << s.cores << " cores\n";
+    if (s.algorithmChoice == 2) {
+        std::cout << "Using SYCL on platform index: " << s.platformIndex
+                  << ", device index: " << s.deviceIndex << "\n";
+    }
+    std::cout << "Running algorithm choice: " << s.algorithmChoice << "\n";
+
+    return s;
 }
