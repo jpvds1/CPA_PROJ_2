@@ -196,3 +196,11 @@ settings getSettings() {
 
     return s;
 }
+
+bool matricesEqual(double* A, double* B, int n, double tol) {
+    for (int i = 0; i < n * n; ++i) {
+        if (std::abs(A[i] - B[i]) > tol)
+            return false;
+    }
+    return true;
+}

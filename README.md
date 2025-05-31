@@ -11,3 +11,5 @@ mkdir -p build_sycl
 cd build_sycl
 cmake -DCMAKE_CXX_COMPILER=acpp ..
 make -j
+
+SYCL_BE=PI_HOST ./matrix_sycl

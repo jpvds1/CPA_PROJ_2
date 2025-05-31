@@ -27,8 +27,18 @@ include_directories(${PAPI_INCLUDE_DIR})
 # Compiler-specific behavior
 if(CMAKE_CXX_COMPILER MATCHES ".*acpp.*")
     message(STATUS "Using AdaptiveCpp (acpp) for SYCL build")
+
     add_executable(matrix_sycl ${SOURCES})
     target_compile_definitions(matrix_sycl PRIVATE USE_SYCL)
+
+    # Enable vectorization and CPU tuning
+    target_compile_options(matrix_sycl PRIVATE
+        -O3
+        -march=native
+        -ffast-math
+        -funroll-loops
+    )
+
     target_link_libraries(matrix_sycl PRIVATE ${PAPI_LIB})
 else()
     message(STATUS "Using standard compiler (g++, clang++) for OpenMP build")

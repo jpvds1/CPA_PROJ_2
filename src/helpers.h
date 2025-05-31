@@ -40,5 +40,6 @@ void freeArrays(double *A, double *B, double *C);
 long long readEnergy();
 void saveResult(std::string type, int size, int cores, int blockSize, double time, double consumed, long long values[]);
 settings getSettings();
+bool matricesEqual(double* A, double* B, int n, double tol = 1e-10);
 
 #endif
