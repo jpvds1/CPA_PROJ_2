@@ -204,3 +204,24 @@ bool matricesEqual(double* A, double* B, int n, double tol) {
     }
     return true;
 }
+
+long long readGpuPowerMilliwatts()
+{
+    FILE *pipe = popen("nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits", "r");
+    if (!pipe)
+    {
+        std::cerr << "Failed to run nvidia-smi.\n";
+        return -1;
+    }
+
+    char buffer[128];
+    if (fgets(buffer, sizeof(buffer), pipe) != NULL)
+    {
+        double powerWatts = atof(buffer); // value like 65.34
+        pclose(pipe);
+        return static_cast<long long>(powerWatts * 1000); // convert to milliwatts
+    }
+
+    pclose(pipe);
+    return -1;
+}

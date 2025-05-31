@@ -114,7 +114,7 @@ std::pair<double, double> SYCLVersion_GPU(const int n, const int blockSize, cl::
     q.memcpy(B_dev, B, n * n * sizeof(double)).wait();
 
     auto start = std::chrono::high_resolution_clock::now();
-    long long energyBefore = readEnergy();
+    long long powerBefore = readGpuPowerMilliwatts();
 
     size_t globalSize = (n + blockSize - 1) / blockSize * blockSize;
 
@@ -157,13 +157,14 @@ std::pair<double, double> SYCLVersion_GPU(const int n, const int blockSize, cl::
 
     q.wait();
 
-    long long energyAfter = readEnergy();
+    long long powerAfter = readGpuPowerMilliwatts();
     auto end = std::chrono::high_resolution_clock::now();
 
     q.memcpy(C, C_dev, n * n * sizeof(double)).wait();
 
     double timeTaken = std::chrono::duration<double, std::milli>(end - start).count();
-    double energyConsumed = (energyAfter - energyBefore) / 1e6;
+    double avgPowerMw = (powerBefore + powerAfter) / 2.0;
+    double energyConsumed = (avgPowerMw * timeTaken) / 1e6;
 
     cl::sycl::free(A_dev, q);
     cl::sycl::free(B_dev, q);
@@ -375,11 +376,7 @@ int main()
     cleanupPAPI(EventSet);
     freeArrays(A_ref, B_ref, C_ref);
 
-    while (true)
-    {
-        std::cout << "\a" << std::flush;
-        sleep(1);
-    }
+    std::cout << "All tests completed successfully.\n";
 
     return 0;
 }
