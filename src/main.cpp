@@ -10,9 +10,11 @@
 #include <chrono>
 #include "helpers.h"
 #include <utility>
-#include <CL/sycl.hpp>
 
+#ifdef USE_SYCL
+#include <CL/sycl.hpp>
 using namespace cl::sycl;
+#endif
 
 std::pair<double, double> sequentialVersion(const int n, const int blockSize)
 {
@@ -22,19 +24,25 @@ std::pair<double, double> sequentialVersion(const int n, const int blockSize)
     auto start = std::chrono::high_resolution_clock::now();
     long long energyBefore = readEnergy();
 
-    for (int i = 0; i < n; i += blockSize) {
+    for (int i = 0; i < n; i += blockSize)
+    {
         int iMax = std::min(i + blockSize, n);
-        for (int k = 0; k < n; k += blockSize) {
+        for (int k = 0; k < n; k += blockSize)
+        {
             int kMax = std::min(k + blockSize, n);
-            for (int j = 0; j < n; j += blockSize) {
+            for (int j = 0; j < n; j += blockSize)
+            {
                 int jMax = std::min(j + blockSize, n);
 
-                for (int ii = i; ii < iMax; ++ii) {
-                    for (int kk = k; kk < kMax; ++kk) {
+                for (int ii = i; ii < iMax; ++ii)
+                {
+                    for (int kk = k; kk < kMax; ++kk)
+                    {
                         double a_val = A[ii * n + kk];
-                        // Use compiler vectorization hints
-                        #pragma omp simd aligned(C, B: 64)
-                        for (int jj = j; jj < jMax; ++jj) {
+// Use compiler vectorization hints
+#pragma omp simd aligned(C, B : 64)
+                        for (int jj = j; jj < jMax; ++jj)
+                        {
                             C[ii * n + jj] += a_val * B[kk * n + jj];
                         }
                     }
@@ -53,16 +61,18 @@ std::pair<double, double> sequentialVersion(const int n, const int blockSize)
     return {timeTaken, energyConsumed};
 }
 
+#ifdef USE_OMP
 std::pair<double, double> parallelVersion(const int n, const int cores, const int blockSize)
 {
     double *A, *B, *C;
     setupArrays(&A, &B, &C, n);
+    omp_set_dynamic(0);
     omp_set_num_threads(cores);
 
     auto start = std::chrono::high_resolution_clock::now();
     long long energyBefore = readEnergy();
 
-    #pragma omp parallel for collapse(3) schedule(static)
+#pragma omp parallel for collapse(3) schedule(static)
     for (int i = 0; i < n; i += blockSize)
         for (int j = 0; j < n; j += blockSize)
             for (int k = 0; k < n; k += blockSize)
@@ -72,15 +82,13 @@ std::pair<double, double> parallelVersion(const int n, const int cores, const in
                 int kMax = std::min(k + blockSize, n);
 
                 for (int ii = i; ii < iMax; ++ii)
-                    for (int kk = k; kk < kMax; ++kk) {
+                    for (int kk = k; kk < kMax; ++kk)
+                    {
                         double a_val = A[ii * n + kk];
                         for (int jj = j; jj < jMax; ++jj)
                             C[ii * n + jj] += a_val * B[kk * n + jj];
                     }
             }
-
-
-
 
     long long energyAfter = readEnergy();
     auto end = std::chrono::high_resolution_clock::now();
@@ -91,16 +99,19 @@ std::pair<double, double> parallelVersion(const int n, const int cores, const in
     freeArrays(A, B, C);
     return {timeTaken, energyConsumed};
 }
+#endif
 
-std::pair<double, double> SYCLVersion(const int n, const int blockSize, queue& q) {
+#ifdef USE_SYCL
+std::pair<double, double> SYCLVersion(const int n, const int blockSize, queue &q)
+{
     // Host arrays
     double *A, *B, *C;
     setupArrays(&A, &B, &C, n);
 
     // Device allocations using USM
-    double* A_dev = malloc_device<double>(n * n, q);
-    double* B_dev = malloc_device<double>(n * n, q);
-    double* C_dev = malloc_device<double>(n * n, q);
+    double *A_dev = malloc_device<double>(n * n, q);
+    double *B_dev = malloc_device<double>(n * n, q);
+    double *C_dev = malloc_device<double>(n * n, q);
 
     // Copy input matrices to device
     q.memcpy(A_dev, A, n * n * sizeof(double)).wait();
@@ -111,7 +122,8 @@ std::pair<double, double> SYCLVersion(const int n, const int blockSize, queue& q
 
     size_t globalSize = (n + blockSize - 1) / blockSize * blockSize;
 
-    q.submit([&](handler& h) {
+    q.submit([&](handler &h)
+             {
         local_accessor<double, 2> A_tile({static_cast<size_t>(blockSize), static_cast<size_t>(blockSize)}, h);
         local_accessor<double, 2> B_tile({static_cast<size_t>(blockSize), static_cast<size_t>(blockSize)}, h);
 
@@ -137,7 +149,7 @@ std::pair<double, double> SYCLVersion(const int n, const int blockSize, queue& q
 
                     item.barrier(access::fence_space::local_space);
 
-                    #pragma unroll
+#pragma unroll
                     for (int k = 0; k < blockSize; ++k)
                         sum += A_tile[li][k] * B_tile[k][lj];
 
@@ -146,8 +158,7 @@ std::pair<double, double> SYCLVersion(const int n, const int blockSize, queue& q
 
                 if (row < n && col < n)
                     C_dev[row * n + col] = sum;
-            });
-    });
+            }); });
 
     q.wait();
 
@@ -167,11 +178,13 @@ std::pair<double, double> SYCLVersion(const int n, const int blockSize, queue& q
 
     return {timeTaken, energyConsumed};
 }
+#endif
 
-
-int main() {
+int main()
+{
     settings s = getSettings();
-    if (s.errorCode != 0) {
+    if (s.errorCode != 0)
+    {
         std::cerr << "Error in settings. Exiting." << std::endl;
         return s.errorCode;
     }
@@ -184,62 +197,94 @@ int main() {
     int EventSet = PAPI_NULL;
     long long values[7];
 
-    if (setupPAPI(EventSet) != PAPI_OK) {
+    if (setupPAPI(EventSet) != PAPI_OK)
+    {
         std::cerr << "PAPI setup failed!" << std::endl;
         return 1;
     }
 
-    switch (s.algorithmChoice) {
-        case 0: {
-            for (int size : sizes) {
-                std::cout << "Running Sequential for size: " << size << std::endl;
+    switch (s.algorithmChoice)
+    {
+    case 0:
+    {
+        for (int size : sizes)
+        {
+            std::cout << "Running Sequential for size: " << size << std::endl;
+
+            PAPI_start(EventSet);
+            results = sequentialVersion(size, s.blockSize);
+            PAPI_stop(EventSet, values);
+
+            saveResult("Sequential", size, s.cores, s.blockSize, results.first, results.second, values);
+        }
+        break;
+    }
+    case 1:
+    {
+#ifdef USE_OMP
+        for (int size : sizes)
+        {
+            std::cout << "Running Parallel for size: " << size << std::endl;
+
+            PAPI_start(EventSet);
+            results = parallelVersion(size, s.cores, s.blockSize);
+            PAPI_stop(EventSet, values);
+
+            saveResult("Parallel", size, s.cores, s.blockSize, results.first, results.second, values);
+        }
+#else
+        std::cerr << "OpenMP support is not enabled in this build. Exiting." << std::endl;
+        cleanupPAPI(EventSet);
+        return 1;
+#endif
+        break;
+    }
+    case 2:
+    {
+#ifdef USE_SYCL
+        for (int size : sizes)
+        {
+            queue q = queue(platform::get_platforms()[s.platformIndex].get_devices()[s.deviceIndex]);
+            if (q.get_device().is_gpu() || q.get_device().is_cpu())
+            {
+                std::cout << "SYCL running for size: " << size << " on: " << q.get_device().get_info<info::device::name>() << "\n";
 
                 PAPI_start(EventSet);
-                results = sequentialVersion(size, s.blockSize);
+                results = SYCLVersion(size, s.blockSize, q);
                 PAPI_stop(EventSet, values);
 
-                saveResult("Sequential", size, s.cores, s.blockSize, results.first, results.second, values);
-            }
-            break;
-        }
-        case 1: {
-            for (int size : sizes) {
-                std::cout << "Running Parallel for size: " << size << std::endl;
-
-                PAPI_start(EventSet);
-                results = parallelVersion(size, s.cores, s.blockSize);
-                PAPI_stop(EventSet, values);
-
-                saveResult("Parallel", size, s.cores, s.blockSize, results.first, results.second, values);
-            }
-            break;
-        }
-        case 2: {
-            for (int size : sizes) {
-                queue q = queue(platform::get_platforms()[s.platformIndex].get_devices()[s.deviceIndex]);
-                if (q.get_device().is_gpu() || q.get_device().is_cpu()) {
-                    std::cout << "SYCL running for size: " << size << " on: " << q.get_device().get_info<info::device::name>() << "\n";
-
-                    PAPI_start(EventSet);
-                    results = SYCLVersion(size, s.blockSize, q);
-                    PAPI_stop(EventSet, values);
-
-                    if (q.get_device().is_gpu()) {
-                        saveResult("SYCL_GPU", size, s.cores, s.blockSize, results.first, results.second, values);
-                    } else {
-                        saveResult("SYCL_CPU", size, s.cores, s.blockSize, results.first, results.second, values);
-                    }
-                } else {
-                    std::cerr << "No suitable device found. Exiting." << std::endl;
-                    return 1;
+                if (q.get_device().is_gpu())
+                {
+                    saveResult("SYCL_GPU", size, s.cores, s.blockSize, results.first, results.second, values);
+                }
+                else
+                {
+                    saveResult("SYCL_CPU", size, s.cores, s.blockSize, results.first, results.second, values);
                 }
             }
-            break;
+            else
+            {
+                std::cerr << "No suitable device found. Exiting." << std::endl;
+                return 1;
+            }
         }
-        default:
-            std::cerr << "Invalid algorithm choice. Exiting." << std::endl;
-            cleanupPAPI(EventSet);
-            return 1;
+#else
+        std::cerr << "SYCL support is not enabled in this build. Exiting." << std::endl;
+        cleanupPAPI(EventSet);
+        return 1;
+#endif
+        break;
+    }
+    default:
+        std::cerr << "Invalid algorithm choice. Exiting." << std::endl;
+        cleanupPAPI(EventSet);
+        return 1;
+    }
+
+    while (true)
+    {
+        std::cout << "\a" << std::flush;
+        sleep(1);
     }
 
     return 0;

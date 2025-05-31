@@ -1,2 +1,4 @@
 /build/
+/build_omp/
+/build_sycl/
 .vscode/

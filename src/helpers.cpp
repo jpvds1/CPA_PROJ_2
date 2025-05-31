@@ -1,6 +1,9 @@
 #include "helpers.h"
 
+
+#ifdef USE_SYCL
 using namespace cl::sycl;
+#endif
 
 // Function to read energy consumption from the system
 long long readEnergy()
@@ -148,6 +151,7 @@ settings getSettings() {
         return s;
     }
 
+    #ifdef USE_OMP
     if (s.algorithmChoice == 1) {
         std::cout << "Enter number of cores (default " << omp_get_max_threads() << "): ";
         std::cin >> s.cores;
@@ -155,8 +159,10 @@ settings getSettings() {
             s.cores = omp_get_max_threads();
         }
     }
+    #endif
 
     if (s.algorithmChoice == 2) {
+        #ifdef USE_SYCL
         auto platforms = platform::get_platforms();
         std::cout << "Available platforms:\n";
         for (size_t i = 0; i < platforms.size(); ++i)
@@ -170,6 +176,10 @@ settings getSettings() {
             std::cout << i << ": " << devices[i].get_info<info::device::name>() << "\n";
         std::cout << "Select device index: ";
         std::cin >> s.deviceIndex;
+
+        #else
+        std::cerr << "SYCL support is not enabled in this build.\n";
+        #endif
     }
 
     std::cout << "Enter block size (default 64): ";

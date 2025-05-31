@@ -16,7 +16,13 @@
 #include <string>
 #include <utility>
 #include <functional>
+#include <cstring>
+
+#ifdef USE_SYCL
 #include <CL/sycl.hpp>
+using namespace cl::sycl;
+#endif
+
 
 struct settings {
     int cores = 16;
